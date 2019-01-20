@@ -1,14 +1,14 @@
 
 import nltk
 from nltk.corpus import shakespeare
-import  xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET
 from nltk.corpus import gutenberg
 import requests
 from lxml import etree
-import pronouncing
+# import pronouncing
 import string
 import numpy as np
-import matplotlib.mlab as mlab
+# import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 import time
 
