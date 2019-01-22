@@ -8,9 +8,12 @@ from lxml import etree
 # import pronouncing
 import string
 import numpy as np
+import rhymes_db
 # import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 import time
+import datatypes
+from typing import List
 
 # def load_shakespeare():
 #     RJ = shakespeare.xml('r_and_j.xml')
@@ -41,21 +44,18 @@ def rhyme_scheme(poem):
     rhyme_coords_ABAB = np.array([0, 1, 4, 5, 8, 9])
     rhyme_score_counter = []
 
-    rhymes_0 = find_rhyming_words(last_words[rhyme_coords_ABAB[0]])
-    rhymes_1 = find_rhyming_words(last_words[rhyme_coords_ABAB[1]])
-
     for line in rhyme_coords_ABAB:
         last_word = last_words[line]
         possible_rhymes = find_rhyming_words(last_word)
-        for entry in possible_rhymes:
-            if entry[0] == last_words[line+2]:
-                rhyme_score_counter.append(tuple([1., float(entry[1])]))
+        for rhyme in possible_rhymes:
+            if rhyme.word2 == last_words[line+2]:
+                rhyme_score_counter.append(tuple([1., float(rhyme.score)]))
             else:
                 pass
     couplet_rhymes = find_rhyming_words(last_words[12])
-    for entry in couplet_rhymes:
-        if entry[0] == last_words[13]:
-            rhyme_score_counter.append(tuple([1., float(entry[1])]))
+    for rhyme in couplet_rhymes:
+        if rhyme.word2 == last_words[13]:
+            rhyme_score_counter.append(tuple([1., float(rhyme.score)]))
         else:
             pass
 
@@ -65,25 +65,27 @@ def rhyme_scheme(poem):
 
     return last_words, rhyme_score_counter, rhyme_score_summary
 
-def find_rhyming_words(word):
-    rhyme_list = requests.get('https://api.datamuse.com/words?rel_rhy=' + word)
-    rhyme_text_results = rhyme_list.text
-    all_rhymes = rhyme_text_results[2:-2].split('},{')
-    rhyme_tuple_list = []
-    for entry in all_rhymes:
-        s1 = entry.replace('"word":','')
-        s2 = s1.replace('"score":', '')
-        s3 = s2.replace('"numSyllables":','')
-        s4 = s3.replace('"','')
-        rhyme_tuple_list.append(tuple(s4.split(',')))
-    return rhyme_tuple_list
+
+def find_rhyming_words(word: str) -> List[datatypes.Rhyme]:
+    with rhymes_db.create_db_connection() as conn:
+        if not rhymes_db.datamuse_rhymes_populated(conn, word):
+            with conn:
+                rhymes_db.populate_datamuse_rhymes(conn, word, lookup_datamuse_rhymes(word))
+        return rhymes_db.find_datamuse_rhymes(conn, word)
+
+
+def lookup_datamuse_rhymes(word: str) -> List[datatypes.Rhyme]:
+    rhyme_list = requests.get('https://api.datamuse.com/words?rel_rhy=' + word).json()
+    return [datatypes.Rhyme(word1=word, word2=rhyme['word'], score=rhyme['score'], num_syllables=rhyme['numSyllables'])
+            for rhyme in rhyme_list if 'score' in rhyme]
+
 
 def histogram_sonnet_scores(sonnets):
 
     rhymes_found_list = []
     rhyme_score_list = []
 
-    for i,j in enumerate(sonnets[0:60]):
+    for i, j in enumerate(sonnets[0:60]):
         words, score, summary = rhyme_scheme(j)
         rhymes_found_list.append(summary[0])
         rhyme_score_list.append(summary[1])
@@ -102,17 +104,19 @@ def histogram_sonnet_scores(sonnets):
     axs[1].hist(rhyme_scores, bins=6, color='darkmagenta', alpha=1.0)
     axs[1].set_title('Sonnet mean rhyme scores')
 
-    timestamp = time()
+    timestamp = time.time()
 
     plt.show()
     fig.savefig(('sonnets_{0}.svg'.format(timestamp)))
 
     return 0
 
+
 def main():
     sonnets = pull_sonnets()
     # rhyme_scheme(sonnets[1])
     histogram_sonnet_scores(sonnets)
+
 
 if __name__ == '__main__':
     main()
