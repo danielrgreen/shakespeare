@@ -1,6 +1,5 @@
 import collections
 import requests
-import logging
 from lxml import etree
 import string
 import rhymes_db
@@ -13,31 +12,21 @@ from typing import List
 # This list contains tuples encoding that: the 0th row should rhyme with the 2nd row, the 1st with the 3rd row, and so
 # on.
 SONNET_EXPECTED_RHYMES = [(0, 2), (1, 3), (4, 6), (5, 7), (8, 10), (9, 11), (12, 13)]
-SONNETS_URL = 'http://www.gutenberg.org/files/1041/1041-h/1041-h.htm'
+GUTENBERG_SONNETS_URL = 'http://www.gutenberg.org/files/1041/1041-h/1041-h.htm'
+DATAMUSE_API_URL = 'https://api.datamuse.com/words?rel_rhy='
 SonnetStats = collections.namedtuple('SonnetStats', ['num_rhymes', 'average_rhyme_score'])
-
-logger = logging.Logger('logger')
 
 
 def pull_sonnets() -> List[List[str]]:
     """Retrieve Shakespeare's sonnets from Gutenberg and return them as lists of strings."""
-    sonnets_html = requests.get(SONNETS_URL).content
+    sonnets_html = requests.get(GUTENBERG_SONNETS_URL).content
     html = etree.HTML(sonnets_html)
     poems_elements = [element for element in html.xpath("//p[@class='poem']")]
-    clean_sonnets = []
-    for element in poems_elements:
-        clean_sonnet = [text.strip() for text in element.itertext() if text.strip()]
-        clean_sonnets.append(clean_sonnet)
-    logger.info('Sonnets retrieved')
-    return clean_sonnets
+    return [[text.strip() for text in element.itertext() if text.strip()] for element in poems_elements]
 
 
 def get_sonnet_stats(poem: List[str]) -> SonnetStats:
-    """Return a rhyme scheme for the given poem in the for of a list of numbers.
-    Every number refers to the first line in the poem with which the given line rhymes.
-    ['A', 'B', 'A', 'B'] -> [1, 2, 1, 2]
-    ['A', 'B', 'C', 'A', 'B'] -> [1, 2, 3, 1, 2]
-    """
+    """Returns sonnet stats for the given sonnet. This method assumes that the given sonnet has 14 lines."""
     poem_without_punctuation = [line.translate(str.maketrans('', '', string.punctuation)) for line in poem]
     last_words = [line.split()[-1] for line in poem_without_punctuation]
     rhyme_score_counter = []
@@ -56,7 +45,7 @@ def get_sonnet_stats(poem: List[str]) -> SonnetStats:
 
 
 def find_rhyming_words(word: str) -> List[datatypes.Rhyme]:
-    """Return a list of Rhymes for which word == Rhyme.word1."""
+    """Returns a list of Rhymes for which word == Rhyme.word1."""
     with rhymes_db.create_db_connection() as conn:
         if not rhymes_db.datamuse_rhymes_populated(conn, word):
             with conn:
@@ -65,12 +54,14 @@ def find_rhyming_words(word: str) -> List[datatypes.Rhyme]:
 
 
 def lookup_datamuse_rhymes(word: str) -> List[datatypes.Rhyme]:
-    rhyme_list = requests.get('https://api.datamuse.com/words?rel_rhy=' + word).json()
+    """Queries datamuse to create a list of Rhymes."""
+    rhyme_list = requests.get(DATAMUSE_API_URL + word).json()
     return [datatypes.Rhyme(word1=word, word2=rhyme['word'], score=rhyme['score'], num_syllables=rhyme['numSyllables'])
             for rhyme in rhyme_list if 'score' in rhyme]
 
 
 def histogram_sonnet_scores(sonnet_stats: List[SonnetStats]) -> None:
+    """Creates visualizations for a list of SonnetStats."""
     rhymes_found_list = [sonnet_stat.num_rhymes for sonnet_stat in sonnet_stats]
     rhyme_score_list = [sonnet_stat.average_rhyme_score for sonnet_stat in sonnet_stats]
 
