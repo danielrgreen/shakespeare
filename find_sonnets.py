@@ -1,39 +1,38 @@
-
-import nltk
-from nltk.corpus import shakespeare
-import xml.etree.ElementTree as ET
-from nltk.corpus import gutenberg
+import collections
 import requests
+import logging
 from lxml import etree
-# import pronouncing
 import string
-import numpy as np
 import rhymes_db
-# import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 import time
 import datatypes
 from typing import List
 
-# def load_shakespeare():
-#     RJ = shakespeare.xml('r_and_j.xml')
-#     hamlet = nltk.Text(nltk.corpus.gutenberg.words('shakespeare-hamlet.txt'))
+# The Sonnet's expected rhyme form is: ABAB CDCD EFEF GG
+# This list contains tuples encoding that: the 0th row should rhyme with the 2nd row, the 1st with the 3rd row, and so
+# on.
+SONNET_EXPECTED_RHYMES = [(0, 2), (1, 3), (4, 6), (5, 7), (8, 10), (9, 11), (12, 13)]
+SONNETS_URL = 'http://www.gutenberg.org/files/1041/1041-h/1041-h.htm'
+SonnetStats = collections.namedtuple('SonnetStats', ['num_rhymes', 'average_rhyme_score'])
+
+logger = logging.Logger('logger')
 
 
-def pull_sonnets():
+def pull_sonnets() -> List[List[str]]:
     """Retrieve Shakespeare's sonnets from Gutenberg and return them as lists of strings."""
-    sonnets_html = requests.get('http://www.gutenberg.org/files/1041/1041-h/1041-h.htm').content
+    sonnets_html = requests.get(SONNETS_URL).content
     html = etree.HTML(sonnets_html)
     poems_elements = [element for element in html.xpath("//p[@class='poem']")]
     clean_sonnets = []
     for element in poems_elements:
         clean_sonnet = [text.strip() for text in element.itertext() if text.strip()]
         clean_sonnets.append(clean_sonnet)
-    print('Sonnets retrieved')
+    logger.info('Sonnets retrieved')
     return clean_sonnets
 
 
-def rhyme_scheme(poem):
+def get_sonnet_stats(poem: List[str]) -> SonnetStats:
     """Return a rhyme scheme for the given poem in the for of a list of numbers.
     Every number refers to the first line in the poem with which the given line rhymes.
     ['A', 'B', 'A', 'B'] -> [1, 2, 1, 2]
@@ -41,32 +40,23 @@ def rhyme_scheme(poem):
     """
     poem_without_punctuation = [line.translate(str.maketrans('', '', string.punctuation)) for line in poem]
     last_words = [line.split()[-1] for line in poem_without_punctuation]
-    rhyme_coords_ABAB = np.array([0, 1, 4, 5, 8, 9])
     rhyme_score_counter = []
 
-    for line in rhyme_coords_ABAB:
-        last_word = last_words[line]
-        possible_rhymes = find_rhyming_words(last_word)
-        for rhyme in possible_rhymes:
-            if rhyme.word2 == last_words[line+2]:
-                rhyme_score_counter.append(tuple([1., float(rhyme.score)]))
-            else:
-                pass
-    couplet_rhymes = find_rhyming_words(last_words[12])
-    for rhyme in couplet_rhymes:
-        if rhyme.word2 == last_words[13]:
-            rhyme_score_counter.append(tuple([1., float(rhyme.score)]))
-        else:
-            pass
+    for line_num1, line_num2 in SONNET_EXPECTED_RHYMES:
+        word1 = last_words[line_num1]
+        word2 = last_words[line_num2]
+        rhyme_match = [rhyme for rhyme in find_rhyming_words(word1) if rhyme.word2 == word2]
+        if len(rhyme_match):
+            rhyme_score_counter.append(float(rhyme_match[0].score))
 
-    rhymes_found = sum(rhyme[0] for rhyme in rhyme_score_counter)
-    rhyme_score_average = sum(score[1] for score in rhyme_score_counter)/rhymes_found
-    rhyme_score_summary = tuple([rhymes_found, rhyme_score_average])
+    num_rhymes_found = len(rhyme_score_counter)
+    rhyme_score_average = sum(rhyme_score_counter) / float(num_rhymes_found)
 
-    return last_words, rhyme_score_counter, rhyme_score_summary
+    return SonnetStats(num_rhymes=num_rhymes_found, average_rhyme_score=rhyme_score_average)
 
 
 def find_rhyming_words(word: str) -> List[datatypes.Rhyme]:
+    """Return a list of Rhymes for which word == Rhyme.word1."""
     with rhymes_db.create_db_connection() as conn:
         if not rhymes_db.datamuse_rhymes_populated(conn, word):
             with conn:
@@ -80,28 +70,16 @@ def lookup_datamuse_rhymes(word: str) -> List[datatypes.Rhyme]:
             for rhyme in rhyme_list if 'score' in rhyme]
 
 
-def histogram_sonnet_scores(sonnets):
-
-    rhymes_found_list = []
-    rhyme_score_list = []
-
-    for i, j in enumerate(sonnets[0:60]):
-        words, score, summary = rhyme_scheme(j)
-        rhymes_found_list.append(summary[0])
-        rhyme_score_list.append(summary[1])
-
-    rhymes_found = np.asarray(rhymes_found_list)
-    rhyme_scores = np.asanyarray(rhyme_score_list)
-
-    print(rhymes_found)
-    print(rhyme_scores)
+def histogram_sonnet_scores(sonnet_stats: List[SonnetStats]) -> None:
+    rhymes_found_list = [sonnet_stat.num_rhymes for sonnet_stat in sonnet_stats]
+    rhyme_score_list = [sonnet_stat.average_rhyme_score for sonnet_stat in sonnet_stats]
 
     fig, axs = plt.subplots(2, 1, tight_layout=True)
 
-    axs[0].hist(rhymes_found, bins=6, color='darkslategrey', alpha=1.0)
+    axs[0].hist(rhymes_found_list, bins=6, color='darkslategrey', alpha=1.0)
     axs[0].set_title('Sonnet rhyming lines found')
 
-    axs[1].hist(rhyme_scores, bins=6, color='darkmagenta', alpha=1.0)
+    axs[1].hist(rhyme_score_list, bins=6, color='darkmagenta', alpha=1.0)
     axs[1].set_title('Sonnet mean rhyme scores')
 
     timestamp = time.time()
@@ -109,13 +87,11 @@ def histogram_sonnet_scores(sonnets):
     plt.show()
     fig.savefig(('sonnets_{0}.svg'.format(timestamp)))
 
-    return 0
-
 
 def main():
     sonnets = pull_sonnets()
-    # rhyme_scheme(sonnets[1])
-    histogram_sonnet_scores(sonnets)
+    sonnet_stats = [get_sonnet_stats(sonnet) for sonnet in sonnets if len(sonnet) == 14]
+    histogram_sonnet_scores(sonnet_stats)
 
 
 if __name__ == '__main__':

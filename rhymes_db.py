@@ -4,11 +4,11 @@ import definitions
 import itertools
 import sqlite3
 from typing import List, Tuple
-
 from datatypes import Rhyme
 
 
 def find_datamuse_rhymes(conn, word: str) -> List[Rhyme]:
+    """Returns a List of Rhymes for which word == Rhyme.word1."""
     c = conn.cursor()
     c.execute("SELECT word2, num_syllables, score FROM datamuse_rhymes WHERE word1 = ?", (word,))
     return [Rhyme(word1=word, word2=res[0], num_syllables=res[1], score=res[2]) for res in c.fetchall()]
