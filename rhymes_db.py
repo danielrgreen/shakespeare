@@ -4,7 +4,6 @@ import definitions
 import itertools
 import sqlite3
 from typing import List, Tuple
-
 from datatypes import Rhyme
 
 
